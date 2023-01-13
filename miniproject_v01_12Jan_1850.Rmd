@@ -1,0 +1,268 @@
+---
+title: "Miniproject - Malaria"
+author: "A T Chamberlain"
+date: "2023-01-12 18:53"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# load packages and start up etc. 
+
+## Load libraries 
+library(tidyverse)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(rgeos)
+library(sf)
+library(rworldmap)
+library(patchwork)
+library(Cairo)
+library(extrafont)
+library(plotly)
+library(tmap)
+if(!require("gifski")) install.packages("gifski")
+```
+
+## R Markdown
+
+# Malaria Dataset
+
+Data Challenge
+There is a Data Challenge hosted by the Wellcome Trust and Sage Bionetworks using the malariaAtlas package of data and tools. A lot of it is related to mapping, feel free to dive in and participate in their challenge or just stay within #TidyTuesday!
+
+3 Datasets available:
+
+- malaria_inc.csv - Malaria incidence by country for all ages across the world across time
+- malaria_deaths.csv - Malaria deaths by country for all ages across the world and time.
+- malaria_deaths_age.csv - Malaria deaths by age across the world and time.
+
+## Data set dictionary of chosen dataset 
+
+### malaria_deaths.csv 
+
+Malaria deaths by country for all ages across the world and time.
+
+- Entity : country name
+- Code : 3 letter code
+- Year : 1990 - 2016 
+- Deaths - Malaria - Sex: Both - Age: Age-standardized (Rate) (per 100,000 people)" range 0 to hundreds 
+
+## Plan of action 
+
+- Produce a static global map plot for 2016 using the malaria_deaths dataset
+- Produce an animated global map of changes in Malaria deaths by country for each year 1990 to 2016  
+
+
+```{r load data, echo=FALSE, message=FALSE, warning=FALSE}
+# Download data from Tidy Tuesday GitHub repository
+malaria_deaths_data <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2018/2018-11-13/malaria_deaths.csv')
+# summary(malaria_deaths_data)
+
+# data wrangling - rename deaths column as not tidy 
+colnames(malaria_deaths_data)
+names(malaria_deaths_data)[names(malaria_deaths_data) == "Deaths - Malaria - Sex: Both - Age: Age-standardized (Rate) (per 100,000 people)"] <- "Deaths"
+head(malaria_deaths_data)
+
+# look at data and slice out most recent year 
+summary(malaria_deaths_data$Year)
+
+# most recent year is 2016 so slice this out 
+malaria_2016_deaths  <- filter(malaria_deaths_data, Year %in% c("2016"))
+
+```
+
+### Carry out some initial EDA 
+
+Note: EDA is for internal use/consumption so at this stage not pretty but do label to help my understanding. Density plots not that helpful as so skwed with most values at 0.0
+
+```{r EDA, echo=FALSE, message=FALSE, warning=FALSE}
+
+ggplot(malaria_deaths_data, aes(x=Deaths)) +
+    geom_histogram(binwidth= 10) +
+    labs(y = "Count", x = "Deaths per 100,000" , title = "Histogram of deaths by country 1990 - 2016") +
+   theme_minimal()
+# Density curve - not effect as V skewed data
+# ggplot(malaria_deaths_data, aes(x=Deaths)) + geom_density()
+ggplot(malaria_2016_deaths, aes(x=Deaths)) +
+     geom_histogram(binwidth= 10) +
+       labs(y = "Countries", x = "Deaths per 100,000" , title = "Histogram of deaths by country for 2016") +
+   theme_minimal()
+
+```
+
+
+## Global maps 
+
+Set up and display a global map in iso projection  
+
+```{r setup global map, echo=FALSE}
+knitr::opts_chunk$set(
+	echo = FALSE,
+	message = FALSE,
+	warning = FALSE
+)
+# knitr::opts_chunk$set(echo = FALSE)
+# knitr::opts_chunk$set(	echo = FALSE,	message = FALSE,warning = FALSE)
+
+world_rnatural = rnaturalearth::ne_download(returnclass = "sf")
+
+# Select key variables and assign them to a new object
+world_iso = world_rnatural %>% 
+  select(NAME_LONG, ISO_A3_EH, POP_EST, GDP_MD, CONTINENT)
+
+# Transform the map
+world_projected = world_iso %>% 
+  st_transform("+proj=moll")
+
+# Plot transformed map
+plot(st_geometry(world_projected))
+```
+
+
+## Now merge the two datasets and display 
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Merge the data using dplyr
+combined_2016_df = dplyr::left_join(world_projected,  # Dataset 1
+                               malaria_2016_deaths,  # Dataset 2
+                               by = c("ISO_A3_EH" = "Code"))  # Variables
+
+# Plot data - all graphs 
+
+# plot(combined_2016_df)
+
+# Plot data for a single variable
+plot(combined_2016_df["Deaths"])
+
+```
+
+
+Current graph is basic but shows that malaria is mainly a problem in Africa and esp West Africa 
+
+Next step is the make it look better ! 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# The tmap package enables publication-quality maps to be created with concise and relatively commands:
+  # may have to run code twice!
+  # Select map type and what to plot
+
+  tm_shape(combined_2016_df) +
+  tm_polygons(c("Deaths")) 
+  
+
+  # Add graticules
+  combined_2016_df.g = st_graticule(combined_2016_df)
+  
+  tm_shape(combined_2016_df.g) +
+    tm_lines(col = "grey") +
+    tm_shape(combined_2016_df) +
+    tm_polygons( c("Deaths"), palette = "viridis") +
+    tm_layout(legend.position = c(0.01, 0.25))
+
+  # redo with sized dots rather than colours  
+  
+ # "white", "gray", "natural", "cobalt", "col_blind", "albatross", "beaver", "bw", "watercolor", "red", "black" 
+  
+tm_shape(combined_2016_df.g) +
+    tm_style("natural") +
+    tm_lines(col = "grey") +
+    tm_shape(combined_2016_df) +
+    tm_polygons(palette = "RdYlBu",title ="Deaths/100,000") +
+    tm_layout(legend.position = c(0.01, 0), 
+              title = "Malaria deaths") +
+    tm_shape(combined_2016_df) +
+    tm_dots(
+      col = c("orangered"),
+      size = c("Deaths"),
+      palette = "viridis"
+      )
+
+```
+
+
+As noted in the lectures/labs colouring the countries means that data for v small counties is lost - eg ??Israel. Using colored dots is better as now shows up better. 
+
+That has acheived my first objective which was a static map and I have done some work to improve readability.  
+
+# Second objective 
+
+Aim is to map an interactive map for 1990 to 2016 to show how situation has changed over the years. Go back and complete the Lab exercise as first part of the cycle.
+
+It seems that cannot get animated figures inserted in the html file by Knitr so will need to switch display mode
+
+.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+  ## Making animated maps ####
+  # ATC version - did not work - probably too complicated!
+## need to do some prep on the malaria_deaths_data 
+
+# Merge the data using dplyr
+#combined_df = dplyr::left_join(world_projected,  # Dataset 1
+#                               malaria_deaths_data,  # Dataset 2
+#                               by = c("ISO_A3_EH" = "Code")) %>% # Variables
+#                     filter(Deaths != "NA") # remove NA values                               
+
+
+  # Create a new variable - date as a text string
+#  combined_df$YearChar = as.character(combined_df$Year)
+  
+    # Add graticules
+#  combined_df.g = st_graticule(combined_df)
+  
+#  tm_shape(combined_df.g) +
+  # Graticule colour
+#  tm_lines(col = "grey") +
+  # Specify object shape
+#  tm_shape(combined_df) +
+  # Draw polygons
+  #  tm_polygons(palette = "RdYlBu",title ="Deaths/100,000") +
+#  tm_polygons(
+#    "Deaths",
+#    palette = "RdYlBu",
+#    n = 10) + # Alter binwidth of death groupings
+  # Create a facet (i.e. plot for each year)
+#  tm_facets("Year", nrow = 1, free.scales.fill = FALSE) +
+  # Alter legend
+#  tm_layout(
+#    legend.outside.position = "bottom",
+#    legend.stack = "horizontal")
+  
+```
+Code below editted by Joe but has gone back to colours rather than dots
+
+```{r}
+
+
+#m = tm_shape(combined_df.g) +
+  
+#  tm_lines(col = "grey") +
+#  tm_shape(combined_df) +
+#  tm_polygons("Deaths", palette = "RdYlBu", n = 10) +
+#  tm_facets(along = "Year", free.coords = FALSE) +
+#  tm_layout(legend.outside = TRUE)
+
+# tmap_animation(m, "malaria-animated-map-test.gif", width = 800)
+```
+
+Change from colours to dots as makes for a better display.  
+
+```{r}
+#m = tm_shape(combined_df.g) +
+#  tm_style("natural") +
+#  tm_lines(col = "grey") +
+#  tm_shape(combined_df) +
+#  tm_polygons("Deaths") +
+#  tm_dots(col = c("orangered"), size = c("Deaths"), palette = "viridis") +
+#  tm_facets(along = "Year", free.coords = FALSE) +
+#  tm_layout(legend.outside = TRUE)
+
+# tmap_animation(m, "malaria-animated-map-test03.gif", width = 1000)
+
+# , palette = "RdYlBu", n = 10
+```
+
+
